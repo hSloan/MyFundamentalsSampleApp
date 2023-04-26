@@ -1,0 +1,98 @@
+module Test where
+
+import Main
+import DA.Set as Set
+import DA.List as List
+import Daml.Script
+
+testTheLibrary : Script ()
+testTheLibrary = script do 
+    -- initialize users
+    joe <- allocatePartyWithHint "JoeGoldberg" (PartyIdHint "JoeGoldberg")
+    joeId <- validateUserId "JoeGoldberg"
+    createUser (User joeId (Some joe)) [CanActAs joe]
+
+    love <- allocatePartyWithHint "LoveQuiin" (PartyIdHint "LoveQuinn")
+    loveId <- validateUserId "LoveQuiin"
+    createUser (User loveId (Some love)) [CanActAs love]
+
+    marienne <- allocatePartyWithHint "MarienneBellamy" (PartyIdHint "MarienneBellamy")
+    marienneId <- validateUserId "MarienneBellamy"
+    createUser (User marienneId (Some marienne)) [CanActAs marienne]
+
+    -- create a Library of Books
+    theLibrary <- submit joe do
+        createCmd BookArchive with
+            librarian = joe
+            books = Set.empty
+            members = Set.empty
+
+    -- add books to library
+    theLibrary2 <- submit joe do
+        exerciseCmd theLibrary AddBook with
+            title = "Desperate Characters" 
+            author = "Paula Cox" 
+
+    theLibrary3 <- submit joe do
+        exerciseCmd theLibrary2 AddBook with
+            title = "Don Quixote" 
+            author = "Miguel de Cervantes" 
+
+    -- fails when a book with no title is given
+    _ <- submitMustFail joe do
+        exerciseCmd theLibrary3 AddBook with
+            title = "" 
+            author = "Mary Shelley" 
+
+    -- fails when someone other than librarian adds a book
+    _ <- submitMustFail marienne do
+        exerciseCmd theLibrary3 AddBook with
+            title = "The Three Musketeers" 
+            author = "Alexandre Dumas" 
+
+    -- open the library to members
+    loveMembership <- submitMulti [joe, love] [] do
+        createCmd Member with
+            name = "Love Quinn"
+            email = "love@quinn.com"
+            active = False
+            applicant = love
+            librarian = joe
+
+
+    -- obtain contents from current state of the library
+    theLibrary3Contents <- queryContractId joe theLibrary3
+
+    -- fails to checkout book because membership has not been approved yet
+    case theLibrary3Contents of
+        None -> error "No library found."
+        Some libContents -> 
+            case Set.toList libContents.books of
+                [] -> error "No books are in the library."
+                books -> do
+                    let bookOfInterest = List.head books
+                    _ <- submitMultiMustFail [joe, love] [] do
+                        exerciseCmd bookOfInterest Checkout with
+                            borrower = love
+                    return ()
+
+    -- approve Love's membership
+    (loveMembership2, theLibrary4) <- submit joe $ exerciseCmd loveMembership AcceptMembership
+
+    -- obtain contents from current state of the library
+    theLibrary4Contents <- queryContractId joe theLibrary4
+
+    -- Love checks out the first book she sees
+    case theLibrary4Contents of
+        None -> error "No library found."
+        Some libContents -> 
+            case Set.toList libContents.books of
+                [] -> error "No books are in the library."
+                books -> do
+                    let bookOfInterest = List.head books
+                    _ <- submitMulti [joe, love] [] do
+                        exerciseCmd bookOfInterest Checkout with
+                            borrower = love
+                    return ()
+
+    return ()
