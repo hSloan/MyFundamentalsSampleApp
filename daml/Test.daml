@@ -8,17 +8,21 @@ import Daml.Script
 testTheLibrary : Script ()
 testTheLibrary = script do 
     -- initialize users
+    public <- allocatePartyWithHint "Public" (PartyIdHint "Public")
+    publicId <- validateUserId "Public"
+    createUser (User publicId (Some public)) [CanActAs public]
+
     joe <- allocatePartyWithHint "JoeGoldberg" (PartyIdHint "JoeGoldberg")
     joeId <- validateUserId "JoeGoldberg"
     createUser (User joeId (Some joe)) [CanActAs joe]
 
     love <- allocatePartyWithHint "LoveQuiin" (PartyIdHint "LoveQuinn")
     loveId <- validateUserId "LoveQuiin"
-    createUser (User loveId (Some love)) [CanActAs love]
+    createUser (User loveId (Some love)) [CanActAs love, CanReadAs public, CanActAs public]
 
     marienne <- allocatePartyWithHint "MarienneBellamy" (PartyIdHint "MarienneBellamy")
     marienneId <- validateUserId "MarienneBellamy"
-    createUser (User marienneId (Some marienne)) [CanActAs marienne]
+    createUser (User marienneId (Some marienne)) [CanActAs marienne, CanReadAs public, CanActAs public]
 
     -- create a Library of Books
     theLibrary <- submit joe do
@@ -26,6 +30,7 @@ testTheLibrary = script do
             librarian = joe
             books = Set.empty
             members = Set.empty
+            public = public
 
     -- add books to library
     theLibrary2 <- submit joe do
@@ -58,10 +63,11 @@ testTheLibrary = script do
             active = False
             applicant = love
             librarian = joe
+            public = public
 
 
     -- obtain contents from current state of the library
-    theLibrary3Contents <- queryContractId joe theLibrary3
+    theLibrary3Contents <- queryContractId public theLibrary3
 
     -- fails to checkout book because membership has not been approved yet
     case theLibrary3Contents of
@@ -71,7 +77,7 @@ testTheLibrary = script do
                 [] -> error "No books are in the library."
                 books -> do
                     let bookOfInterest = List.head books
-                    _ <- submitMultiMustFail [joe, love] [] do
+                    _ <- submitMultiMustFail [joe, love] [public] do
                         exerciseCmd bookOfInterest Checkout with
                             borrower = love
                     return ()
@@ -90,7 +96,8 @@ testTheLibrary = script do
                 [] -> error "No books are in the library."
                 books -> do
                     let bookOfInterest = List.head books
-                    _ <- submitMulti [joe, love] [] do
+                    -- TODO: I don't want to need public signature for this transaction
+                    _ <- submitMulti [joe, love] [public]  do
                         exerciseCmd bookOfInterest Checkout with
                             borrower = love
                     return ()

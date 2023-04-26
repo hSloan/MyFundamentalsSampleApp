@@ -3,31 +3,45 @@ module Main where
 import DA.Set as Set
 
 template BookArchive
-    with 
+    with
         librarian: Party
         books: Set.Set (ContractId Book)
         members: Set.Set (ContractId Member)
+        public: Party
     where
-        key (librarian) : Party
+        key librarian : Party
         maintainer key
         signatory librarian
+        observer public
+        choice RequestMembership: ()
+            with
+                signupName: Text
+                signupEmail: Text
+                -- TODO: How to select the user exercising the choice instead of using a record field?
+                memberInQuestion: Party
+            controller public
+            do
+                create Member with
+                    name = signupName
+                    email = signupEmail
+                    active = False
+                    applicant = memberInQuestion
+                    librarian
+                    public = public
+                return ()
         choice AddBook: ContractId BookArchive
-            with 
+            with
                 title: Text
                 author: Text
             controller librarian
-            do 
+            do
               bookId <- create Book with
                     title
                     author
                     isAvailable = True
                     librarian
+                    public
               create this with books = Set.insert bookId books
-        choice AddMember: ContractId BookArchive
-            with
-                member: ContractId Member
-            controller librarian
-            do create this with members = Set.insert member members
         choice RemoveMember: ContractId BookArchive
             with
                 member: ContractId Member
@@ -40,34 +54,39 @@ template Book
         author: Text
         isAvailable: Bool
         librarian: Party
+        public: Party
     where
         signatory librarian
+        observer public
         ensure title /= "" && author /= ""
         choice  Checkout: ContractId Book
-            with 
+            with
                 borrower: Party
+            observer public
             controller borrower
-            do 
+            do
                (baKey, theBookArchive) <- fetchByKey @BookArchive librarian
                (mKey, _) <- fetchByKey @Member borrower
                assertMsg "Only members can checkout books." (Set.member mKey theBookArchive.members)
-               assertMsg "This book is not available." isAvailable 
+               assertMsg "This book is not available." isAvailable
                create this with isAvailable = False
         choice  Return: ContractId Book
-            with 
+            with
                 borrower: Party
+            observer public
             controller borrower
-            do 
-               assertMsg "This book has already been returned." (isAvailable /= True)
+            do
+               assertMsg "This book has already been returned." (not isAvailable)
                create this with isAvailable = True
-        
+
 template Member
-    with 
+    with
         name: Text
         email: Text
         active: Bool
         applicant: Party
         librarian: Party
+        public: Party
     where
         key applicant : Party
         maintainer key
@@ -75,7 +94,8 @@ template Member
         ensure name /= "" && email /= ""
         choice AcceptMembership: (ContractId Member, ContractId BookArchive)
             controller librarian
-            do 
+            do
+                assertMsg "This party is not allowed to sign up." (applicant /= public)
                 newMember <- create this with active = True
                 (bookArchiveId, bookArchive) <- fetchByKey @BookArchive librarian
                 archive bookArchiveId
@@ -83,4 +103,5 @@ template Member
                     librarian
                     books = bookArchive.books
                     members = Set.insert newMember bookArchive.members
+                    public = public
                 return (newMember, updatedBookArchive)
